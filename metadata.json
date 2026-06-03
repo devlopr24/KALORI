@@ -1,0 +1,10 @@
+{
+  "name": "KALORI",
+  "description": "India's first AI-powered calorie tracking app for Indian food.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

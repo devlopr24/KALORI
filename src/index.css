@@ -1,0 +1,66 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', sans-serif;
+  --color-brand-primary: #FFFFFF;
+  --color-brand-secondary: #FAFAFA;
+  --color-brand-tertiary: #F5F5F7;
+  --color-text-primary: #1A1A1A;
+  --color-text-secondary: #8E8E93;
+  --color-text-tertiary: #C7C7CC;
+  --color-border-light: #F0F0F0;
+  --color-accent-orange: #FF6B35;
+  --color-success-green: #4CAF50;
+  --color-protein-red: #FF6B6B;
+  --color-carbs-orange: #FFA500;
+  --color-fats-blue: #4A90E2;
+  --color-button-black: #000000;
+}
+
+@layer base {
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    background-color: var(--color-brand-tertiary);
+    color: var(--color-text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    touch-action: pan-x pan-y;
+    overscroll-behavior-y: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Allow text selection only in inputs */
+  input, textarea {
+    -webkit-user-select: auto;
+    user-select: auto;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .card-shadow {
+    box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.04);
+  }
+  .elevated-shadow {
+    box-shadow: 0px 4px 16px rgba(0, 0, 0, 0.08);
+  }
+  .button-shadow {
+    box-shadow: 0px 2px 4px rgba(0,0,0,0.1);
+  }
+}
