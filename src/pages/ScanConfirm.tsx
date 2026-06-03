@@ -2,7 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Check, Sparkles, X, Pencil } from 'lucide-react';
-import { Meal } from '@/hooks/useUserData';
+import { useAuth } from '@/contexts/AuthContext';
+import { mealService } from '@/lib/mealService';
+import toast from 'react-hot-toast';
 
 // Configuration Data
 const PORTION_OPTIONS = [
@@ -52,6 +54,8 @@ export function ScanConfirm() {
   const [selectedPortion, setSelectedPortion] = useState(PORTION_OPTIONS[1]); // Default to 1 Plate
   const [selectedExtras, setSelectedExtras] = useState<typeof EXTRAS_OPTIONS>([]);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const { user } = useAuth();
 
   useEffect(() => {
     if (!aiResult) {
@@ -82,47 +86,45 @@ export function ScanConfirm() {
 
   const getMealType = () => {
     const hour = new Date().getHours();
-    if (hour >= 5 && hour < 11) return "Breakfast";
-    if (hour >= 11 && hour < 16) return "Lunch";
-    if (hour >= 16 && hour < 19) return "Snack";
-    if (hour >= 19 && hour < 23) return "Dinner";
-    return "Late Night";
+    if (hour >= 5 && hour < 11) return "breakfast";
+    if (hour >= 11 && hour < 16) return "lunch";
+    if (hour >= 16 && hour < 19) return "snack";
+    if (hour >= 19 && hour < 23) return "dinner";
+    return "late_night";
   };
 
-  const handleAddLog = () => {
-    const meal = {
-      id: Date.now().toString(),
-      name: aiResult.dish_name_english,
-      name_hindi: aiResult.dish_name_hindi,
-      time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-      meal_type: getMealType(),
-      date: new Date().toISOString().split('T')[0],
-      calories: totalCalories,
-      protein: totalP,
-      carbs: totalC,
-      fats: totalF,
-      emoji: aiResult.emoji,
-      image_url: rawImage,
-      portion: selectedPortion.label,
-      extras: selectedExtras.map(e => e.label),
-      confidence: aiResult.confidence,
-      ingredients: aiResult.detected_ingredients
-    };
+  const handleAddLog = async () => {
+    if (!user) return;
+    try {
+      setLoading(true);
 
-    const existingMeals = getStoredJSON(localStorage, 'meals_today', []);
-    setStoredJSON(localStorage, 'meals_today', [meal, ...existingMeals]);
+      const ingredientsString = typeof aiResult.detected_ingredients === 'string' ? aiResult.detected_ingredients : JSON.stringify(aiResult.detected_ingredients);
 
-    // Update streak logic
-    const today = new Date().toISOString().split('T')[0];
-    const lastScanDate = localStorage.getItem('last_scan_date');
-    if (lastScanDate !== today) {
-      const currentStreak = parseInt(localStorage.getItem('current_streak') || '0', 10);
-      localStorage.setItem('current_streak', (currentStreak + 1).toString());
-      localStorage.setItem('last_scan_date', today);
+      await mealService.addMeal(user.id, {
+        name: aiResult.dish_name_english,
+        name_hindi: aiResult.dish_name_hindi,
+        emoji: aiResult.emoji,
+        meal_type: getMealType(),
+        calories: totalCalories,
+        protein: totalP,
+        carbs: totalC,
+        fats: totalF,
+        portion_label: selectedPortion.label,
+        portion_grams: parseInt(selectedPortion.grams) || null,
+        servings: 1, // default
+        scan_method: 'ai_camera',
+        ai_confidence: aiResult.confidence,
+        notes: JSON.stringify({ extras: selectedExtras.map(e => e.label), ingredients: ingredientsString })
+      });
+
+      setShowSuccess(true);
+      setTimeout(() => navigate('/'), 800);
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to save meal');
+    } finally {
+      setLoading(false);
     }
-
-    setShowSuccess(true);
-    setTimeout(() => navigate(`/meal/${meal.id}`), 1200);
   };
 
   return (

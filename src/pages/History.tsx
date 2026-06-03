@@ -2,6 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, X, ChevronRight, Eye, Copy, Edit2, Share, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
+import { mealService } from '@/lib/mealService';
+import toast from 'react-hot-toast';
 
 const MOCK_MEALS = [
   { id: '1', name: 'Masala Dosa', meal_type: 'Breakfast', time: '8:30 AM', calories: 412, protein: 8, carbs: 68, fats: 12, emoji: '🥞', date: 'Today' },
@@ -13,45 +16,44 @@ const MOCK_MEALS = [
 
 export function History() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [meals, setMeals] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
   const [selectedMeal, setSelectedMeal] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      const storedMeals = localStorage.getItem('meals_history');
-      let allMeals: any[] = [];
-      if (storedMeals) {
-        const parsed = JSON.parse(storedMeals);
-        Object.keys(parsed).forEach(date => {
-          allMeals.push(...parsed[date]);
-        });
-      }
-      
-      const todayMealsStr = localStorage.getItem('meals_today');
-      if (todayMealsStr) {
-         allMeals.push(...JSON.parse(todayMealsStr));
-      }
-      
-      // If we don't have enough meals, fake some for demo purposes
-      if (allMeals.length === 0) {
-        allMeals = MOCK_MEALS;
-      }
-      
-      // Map to ensure they have dates correctly format
-      const finalMeals = allMeals.map(m => ({...m, dateStr: m.date || 'Earlier'})).reverse();
-      setMeals(finalMeals);
-    } catch {
-      setMeals(MOCK_MEALS.reverse());
-    }
-  }, []);
+    if (!user) return;
 
-  const filters = ['All', '🍳 Breakfast', '🍛 Lunch', '🌙 Dinner', '☕ Snacks'];
+    const fetchAllMeals = async () => {
+      try {
+        setLoading(true);
+        const data = await mealService.getAllMeals(user.id);
+        
+        // Map to ensure they have dates correctly formatted
+        const finalMeals = (data || []).map(m => ({
+          ...m, 
+          dateStr: m.meal_date || 'Earlier',
+          time: new Date(m.logged_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+        })).reverse();
+        setMeals(finalMeals);
+      } catch (error) {
+        toast.error('Failed to load history');
+        setMeals([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAllMeals();
+  }, [user]);
+
+  const filters = ['All', '🍳 breakfast', '🍛 lunch', '🌙 dinner', '☕ snack'];
 
   const filteredMeals = useMemo(() => {
     return meals.filter(meal => {
-      const matchSearch = meal.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchSearch = meal.name?.toLowerCase().includes(searchQuery.toLowerCase());
       if (!matchSearch) return false;
       if (activeFilter === 'All') return true;
       const typeStr = activeFilter.split(' ')[1];
@@ -62,23 +64,34 @@ export function History() {
   const groupedMeals = useMemo(() => {
     const groups: Record<string, any[]> = {};
     filteredMeals.forEach(meal => {
-      const date = meal.date || 'Earlier';
+      const date = meal.meal_date || 'Earlier';
       if (!groups[date]) groups[date] = [];
       groups[date].push(meal);
     });
-    return groups;
+    // Sort groups in descending order
+    return Object.keys(groups).sort((a,b) => b.localeCompare(a)).reduce((acc, key) => {
+        acc[key] = groups[key];
+        return acc;
+    }, {} as Record<string, any[]>);
   }, [filteredMeals]);
 
-  const handleQuickAdd = (meal: any, e: React.MouseEvent) => {
+  const handleQuickAdd = async (meal: any, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!user) return;
     try {
-      const todayMeals = JSON.parse(localStorage.getItem('meals_today') || '[]');
-      const newMeal = { ...meal, id: Date.now().toString(), date: 'Today', time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) };
-      localStorage.setItem('meals_today', JSON.stringify([...todayMeals, newMeal]));
-      alert('Added to Today!');
-      // Update local state if needed
+      await mealService.duplicateMeal(user.id, meal);
+      toast.success('Added to Today!');
+      // refresh meals
+      const data = await mealService.getAllMeals(user.id);
+      const finalMeals = (data || []).map(m => ({
+        ...m, 
+        dateStr: m.meal_date || 'Earlier',
+        time: new Date(m.logged_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+      })).reverse();
+      setMeals(finalMeals);
     } catch (e) {
       console.error(e);
+      toast.error('Failed to duplicate meal');
     }
   };
 
@@ -86,12 +99,19 @@ export function History() {
     setSelectedMeal(meal);
   };
 
-  const handleDelete = () => {
-    if (!selectedMeal) return;
+  const handleDelete = async () => {
+    if (!selectedMeal || !user) return;
     const confirmDelete = window.confirm('Delete this meal?');
     if (confirmDelete) {
-      setMeals(meals.filter(m => m.id !== selectedMeal.id));
-      setSelectedMeal(null);
+      try {
+        await mealService.deleteMeal(user.id, selectedMeal.id);
+        setMeals(meals.filter(m => m.id !== selectedMeal.id));
+        toast.success("Meal deleted");
+      } catch (e) {
+        toast.error("Failed to delete meal");
+      } finally {
+        setSelectedMeal(null);
+      }
     }
   };
 

@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Share, MoreHorizontal, Bookmark, Edit2, Copy, Trash2, Sparkles } from 'lucide-react';
-import { Meal } from '../hooks/useUserData';
+import { useAuth } from '@/contexts/AuthContext';
+import { mealService } from '@/lib/mealService';
+import toast from 'react-hot-toast';
 
 const defaultIngredients = [
   { name: 'Basmati Rice', portion: '150g', calories: 195 },
@@ -15,35 +17,54 @@ const defaultIngredients = [
 export function MealDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [meal, setMeal] = useState<Meal | null>(null);
+  const { user } = useAuth();
+  const [meal, setMeal] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
   const [servings, setServings] = useState(1);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
   useEffect(() => {
-    try {
-      const meals = JSON.parse(localStorage.getItem('meals_today') || '[]');
-      const foundMeal = meals.find((m: Meal) => m.id === id);
-      if (foundMeal) {
-        setMeal(foundMeal);
-        setServings(foundMeal.servings || 1);
-      } else {
-        setMeal(null);
+    if (!user || !id) return;
+    
+    const fetchMeal = async () => {
+      try {
+        setLoading(true);
+        const data = await mealService.getMealById(user.id, id);
+        if (data) {
+          setMeal(data);
+          setServings(data.servings || 1);
+        } else {
+          setMeal(null);
+        }
+      } catch (error) {
+        console.error(error);
+        toast.error('Failed to load meal details');
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      setMeal(null);
-    }
-  }, [id]);
+    };
+
+    fetchMeal();
+  }, [id, user]);
+
+  if (loading) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-brand-tertiary">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-400 border-t-gray-900"></div>
+      </div>
+    );
+  }
 
   if (!meal) {
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center bg-brand-tertiary">
         <span className="text-6xl mb-6">🔍</span>
-        <h2 className="mb-2 text-2xl font-bold text-gray-900">Meal Not Found</h2>
+        <h2 className="mb-2 text-2xl font-bold text-[#1A1A1A]">Meal Not Found</h2>
         <p className="mb-8 text-sm font-medium text-gray-500">This meal may have been deleted</p>
         <button
           onClick={() => navigate('/')}
-          className="rounded-full bg-button-black px-8 py-3 font-semibold text-white transition-opacity hover:opacity-90"
+          className="rounded-full bg-[#1A1A1A] px-8 py-3 font-semibold text-white transition-opacity hover:opacity-90"
         >
           Go to Home
         </button>
@@ -92,39 +113,48 @@ export function MealDetail() {
     }
   };
 
-  const handleDelete = () => {
-    const meals = JSON.parse(localStorage.getItem('meals_today') || '[]');
-    const newMeals = meals.filter((m: Meal) => m.id !== id);
-    localStorage.setItem('meals_today', JSON.stringify(newMeals));
-    navigate(-1);
+  const handleDelete = async () => {
+    if (!user || !id) return;
+    try {
+      await mealService.deleteMeal(user.id, id);
+      toast.success("Meal deleted");
+      navigate(-1);
+    } catch (e) {
+      toast.error("Failed to delete meal");
+    }
   };
 
-  const handleDone = () => {
-    const meals = JSON.parse(localStorage.getItem('meals_today') || '[]');
-    const updatedMeals = meals.map((m: Meal) => {
-      if (m.id === id) {
-        return {
-          ...m,
+  const handleDone = async () => {
+    if (!user || !id) return;
+    try {
+      if (servings !== meal.servings) {
+        await mealService.updateMeal(user.id, id, {
           servings,
           calories: adjustedCalories,
           protein: adjustedProtein,
           carbs: adjustedCarbs,
           fats: adjustedFats
-        };
+        });
+        toast.success("Meal updated");
       }
-      return m;
-    });
-    localStorage.setItem('meals_today', JSON.stringify(updatedMeals));
-    navigate(-1);
+      navigate(-1);
+    } catch (error) {
+      toast.error("Failed to update meal");
+    }
   };
   
   const formatDate = () => {
     if (meal.date === 'Today') return 'Today';
     if (meal.date === 'Yesterday') return 'Yesterday';
-    return meal.date || 'Today';
+    return meal.meal_date || meal.date || 'Today';
   };
+  
+  const parsedNotes = meal.notes ? (typeof meal.notes === 'string' ? JSON.parse(meal.notes) : meal.notes) : null;
+  const rawIngredients = parsedNotes?.ingredients ? (typeof parsedNotes.ingredients === 'string' ? JSON.parse(parsedNotes.ingredients) : parsedNotes.ingredients) : null;
 
-  const ingredients = meal.ingredients && meal.ingredients.length > 0 ? meal.ingredients : defaultIngredients;
+  const ingredients = Array.isArray(rawIngredients) && rawIngredients.length > 0 ? rawIngredients : (meal.ingredients || defaultIngredients);
+  
+  const formattedTime = meal.logged_at ? new Date(meal.logged_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : (meal.time || '');
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-brand-tertiary">
@@ -189,7 +219,7 @@ export function MealDetail() {
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-1.5 rounded-full bg-[#F5F5F7] px-3 py-1.5">
               <Bookmark size={14} className="fill-[#1A1A1A] text-[#1A1A1A] opacity-90" />
-              <span className="text-xs font-semibold text-[#1A1A1A]">{meal.time}</span>
+              <span className="text-xs font-semibold text-[#1A1A1A]">{formattedTime}</span>
             </div>
             <span className="text-xs font-medium text-[#8E8E93]">{formatDate()}</span>
           </motion.div>

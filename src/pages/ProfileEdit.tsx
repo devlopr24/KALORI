@@ -2,9 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
+import toast from 'react-hot-toast';
 
 export function ProfileEdit() {
   const navigate = useNavigate();
+  const { user, profile, refreshProfile } = useAuth();
+  const [saving, setSaving] = useState(false);
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -17,44 +22,56 @@ export function ProfileEdit() {
   const [activity, setActivity] = useState('Moderate');
 
   useEffect(() => {
-    const getSetting = (key: string, def: any) => {
-      try {
-        const val = localStorage.getItem(key);
-        return val ? JSON.parse(val) : def;
-      } catch {
-        return def;
-      }
-    };
+    setName(user?.user_metadata?.full_name || localStorage.getItem('user_name') || 'KALORI User');
+    setEmail(user?.email || localStorage.getItem('user_email') || '');
+    setAge(profile?.age?.toString() || localStorage.getItem('user_age') || '25');
+    setHeightValue(profile?.height_cm?.toString() || localStorage.getItem('user_height') || '175');
+    setHeightUnit((localStorage.getItem('height_unit') as any) || 'cm');
+    setWeightValue(profile?.current_weight_kg?.toString() || localStorage.getItem('current_weight_kg') || '70');
+    setWeightUnit((localStorage.getItem('weight_unit') as any) || 'kg');
+    setGender(profile?.gender || localStorage.getItem('user_gender') || 'Male');
+    setActivity(profile?.activity_level || localStorage.getItem('activity_level') || 'Moderate');
+  }, [user, profile]);
+
+  const handleSave = async () => {
+    if (!user) return;
     
-    setName(getSetting('user_name', 'KALORI User'));
-    setEmail(getSetting('user_email', ''));
-    setAge(getSetting('user_age', '25'));
-    setHeightValue(getSetting('user_height', '175'));
-    setHeightUnit(getSetting('height_unit', 'cm'));
-    setWeightValue(getSetting('current_weight_kg', '70'));
-    setWeightUnit(getSetting('weight_unit', 'kg'));
-    setGender(getSetting('user_gender', 'Male'));
-    setActivity(getSetting('activity_level', 'Moderate'));
-  }, []);
-
-  const handleSave = () => {
-    const setSetting = (key: string, value: any) => {
-      try {
-        localStorage.setItem(key, JSON.stringify(value));
-      } catch {}
-    };
-
-    setSetting('user_name', name);
-    setSetting('user_email', email);
-    setSetting('user_age', age);
-    setSetting('user_height', heightValue);
-    setSetting('height_unit', heightUnit);
-    setSetting('current_weight_kg', parseFloat(weightValue) || 70);
-    setSetting('weight_unit', weightUnit);
-    setSetting('user_gender', gender);
-    setSetting('activity_level', activity);
-
-    navigate(-1);
+    try {
+      setSaving(true);
+      
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          age: parseInt(age) || null,
+          height_cm: parseFloat(heightValue) || null,
+          current_weight_kg: parseFloat(weightValue) || null,
+          gender,
+          activity_level: activity
+        })
+        .eq('id', user.id);
+        
+      if (error) throw error;
+      
+      // Update metadata name
+      await supabase.auth.updateUser({ data: { full_name: name } });
+      
+      // Fallback settings storage for local uses
+      localStorage.setItem('user_name', name);
+      localStorage.setItem('user_email', email);
+      localStorage.setItem('user_age', age);
+      localStorage.setItem('user_height', heightValue);
+      localStorage.setItem('height_unit', heightUnit);
+      localStorage.setItem('weight_unit', weightUnit);
+      
+      await refreshProfile();
+      toast.success("Profile saved!");
+      navigate(-1);
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to save profile");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -155,10 +172,11 @@ export function ProfileEdit() {
 
       <div className="border-t border-[#F0F0F0] bg-white p-4 pb-[max(20px,env(safe-area-inset-bottom))] shadow-[0_-4px_12px_rgba(0,0,0,0.04)]">
         <button 
+          disabled={saving}
           onClick={handleSave}
-          className="w-full rounded-full bg-[#1A1A1A] py-4 text-[16px] font-bold text-white shadow-[0_4px_16px_rgba(0,0,0,0.15)] active:opacity-90 transition-opacity"
+          className="w-full rounded-full bg-[#1A1A1A] py-4 text-[16px] font-bold text-white shadow-[0_4px_16px_rgba(0,0,0,0.15)] active:opacity-90 transition-opacity disabled:opacity-50"
         >
-          Save Changes
+          {saving ? "Saving..." : "Save Changes"}
         </button>
       </div>
     </div>

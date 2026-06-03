@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ResponsiveContainer, 
@@ -9,26 +9,10 @@ import {
   AreaChart,
   CartesianGrid
 } from 'recharts';
-import { Target, Trophy, TrendingUp, BarChart2, CheckCircle2, ChevronRight, Scale, X, Flame } from 'lucide-react';
-
-const getStoredData = (key: string, defaultValue: any) => {
-  try {
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : defaultValue;
-  } catch (error) {
-    console.warn(`Error reading ${key}:`, error);
-    return defaultValue;
-  }
-};
-
-const mockWeightHistory = [
-  { month: 'Jun', weight: 75.0, date: '2025-06-01' },
-  { month: 'Jul', weight: 74.2, date: '2025-07-01' },
-  { month: 'Aug', weight: 73.5, date: '2025-08-01' },
-  { month: 'Sep', weight: 72.5, date: '2025-09-01' },
-  { month: 'Oct', weight: 71.5, date: '2025-10-01' },
-  { month: 'Nov', weight: 70.5, date: '2025-11-01' }
-];
+import { Target, Trophy, TrendingUp, BarChart2, CheckCircle2, ChevronRight, Scale, X, Flame, Trash2 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { weightService, WeightEntry } from '@/lib/weightService';
+import toast from 'react-hot-toast';
 
 const mockDailyInsights = [
   { day: 'M', calories: 2400, status: 'hit' },
@@ -41,34 +25,163 @@ const mockDailyInsights = [
 ];
 
 export function Progress() {
-  const [currentWeight, setCurrentWeight] = useState(70.5);
-  const [goalWeight, setGoalWeight] = useState(65.0);
-  const [streak, setStreak] = useState(5);
-  const [weightHistory, setWeightHistory] = useState(mockWeightHistory);
-  const [timeRange, setTimeRange] = useState('6M');
+  const { user, profile, refreshProfile } = useAuth();
+  
+  const [weightHistory, setWeightHistory] = useState<WeightEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const [range, setRange] = useState<'90D'|'6M'|'1Y'|'ALL'>('6M');
+  
   const [showWeightModal, setShowWeightModal] = useState(false);
-  const [newWeight, setNewWeight] = useState(currentWeight);
+  const [savingWeight, setSavingWeight] = useState(false);
+  
+  const [newWeight, setNewWeight] = useState(70);
+  const [unit, setUnit] = useState<'kg'|'lbs'>('kg');
+  const [entryDateType, setEntryDateType] = useState<'today'|'yesterday'|'custom'>('today');
+  const [customDate, setCustomDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [notes, setNotes] = useState('');
+  const [mood, setMood] = useState<'great' | 'good' | 'okay' | 'bad' | null>(null);
+
+  const rangeToDays: Record<string, number | undefined> = { '90D': 90, '6M': 180, '1Y': 365, 'ALL': undefined };
+
+  const fetchHistory = async () => {
+    if (!user) return;
+    try {
+      setLoading(true);
+      setError(false);
+      
+      const days = rangeToDays[range];
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+      const data = await weightService.getWeightHistory(user.id, days);
+      clearTimeout(timeoutId);
+      
+      setWeightHistory(data);
+      localStorage.setItem('weight_history_cache', JSON.stringify(data));
+    } catch (err: any) {
+      console.error(err);
+      if (err.name === 'AbortError') {
+         setError(true);
+         toast.error("Couldn't load weight history (timeout)");
+      } else {
+        const cached = localStorage.getItem('weight_history_cache');
+        if (cached) {
+          setWeightHistory(JSON.parse(cached));
+          toast("You're offline. Showing last saved data");
+        } else {
+          setError(true);
+          toast.error("Couldn't load weight history");
+        }
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    // Initialize data
-    const localWeight = getStoredData('current_weight_kg', 70.5);
-    const localGoal = getStoredData('goal_weight_kg', 65.0);
-    const localStreak = getStoredData('current_streak', 5);
-    const localHist = getStoredData('weight_history', mockWeightHistory);
+    fetchHistory();
+  }, [user, range]);
 
-    setCurrentWeight(localWeight);
-    setGoalWeight(localGoal);
-    setStreak(localStreak);
-    setWeightHistory(localHist);
-    setNewWeight(localWeight);
-  }, []);
+  useEffect(() => {
+    if (showWeightModal) {
+      const baseWeight = profile?.current_weight_kg || 70;
+      setNewWeight(unit === 'lbs' ? Number((baseWeight / 0.453592).toFixed(1)) : baseWeight);
+      setEntryDateType('today');
+      setNotes('');
+      setMood(null);
+    }
+  }, [showWeightModal]);
 
-  const progressPercent = Math.min(
-    100,
-    Math.max(0, ((75 - currentWeight) / (75 - goalWeight)) * 100) // Assuming starting at 75 for demo
-  );
+  const handleUnitToggle = (newUnit: 'kg'|'lbs') => {
+    if (newUnit === unit) return;
+    setUnit(newUnit);
+    if (newUnit === 'lbs') {
+      setNewWeight(Number((newWeight / 0.453592).toFixed(1)));
+    } else {
+      setNewWeight(Number((newWeight * 0.453592).toFixed(1)));
+    }
+  };
 
-  const isLosing = weightHistory.length > 1 && weightHistory[weightHistory.length - 1].weight <= weightHistory[weightHistory.length - 2].weight;
+  const handleSaveWeight = async () => {
+    if (!user) return;
+    try {
+      setSavingWeight(true);
+      const weight_kg = unit === 'lbs' ? Number((newWeight * 0.453592).toFixed(2)) : newWeight;
+      
+      let loggedDate = customDate;
+      if (entryDateType === 'today') {
+        loggedDate = new Date().toISOString().split('T')[0];
+      } else if (entryDateType === 'yesterday') {
+        loggedDate = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+      }
+
+      await weightService.upsertWeightEntry(user.id, {
+        weight_kg,
+        logged_date: loggedDate,
+        notes: notes.trim() || null,
+        mood
+      });
+
+      await refreshProfile();
+      await fetchHistory();
+
+      toast.success("Weight saved ✓");
+      setShowWeightModal(false);
+    } catch (err) {
+      console.error(err);
+      toast.error("Couldn't save weight entry");
+    } finally {
+      setSavingWeight(false);
+    }
+  };
+
+  const handleDeleteEntry = async (entryId: string) => {
+    if (!user) return;
+    if (!window.confirm("Delete this weight entry?")) return;
+    
+    try {
+      await weightService.deleteWeightEntry(user.id, entryId);
+      setWeightHistory(prev => prev.filter(e => e.id !== entryId));
+      if (weightHistory.length > 0 && profile) {
+          refreshProfile(); // Optionally update profile if the latest weight was deleted, though this might be complex to determine what the 'newest' is directly without a server trigger. We'll let them refresh or re-weigh.
+      }
+      toast.success("Entry deleted");
+    } catch (e) {
+      toast.error("Couldn't delete entry");
+    }
+  };
+
+  const currentWeight = profile?.current_weight_kg;
+  const goalWeight = profile?.goal_weight_kg;
+  const hasWeightGoal = currentWeight != null && goalWeight != null;
+  const streak = profile?.current_streak || 0;
+
+  const getStartWeight = () => {
+    if (weightHistory.length === 0) return currentWeight || 0;
+    const max = Math.max(...weightHistory.map(w => w.weight_kg));
+    if (goalWeight && currentWeight && goalWeight > currentWeight) {
+        return Math.min(...weightHistory.map(w => w.weight_kg));
+    }
+    return max;
+  };
+
+  const startW = getStartWeight();
+  let progressPercent = 0;
+  if (hasWeightGoal && startW !== goalWeight) {
+    progressPercent = Math.min(100, Math.max(0, ((startW - currentWeight) / (startW - goalWeight)) * 100));
+  }
+
+  const graphData = useMemo(() => {
+    return weightHistory.map(entry => {
+      const d = new Date(entry.logged_date);
+      const month = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      return { month, dateISO: entry.logged_date, weight: entry.weight_kg };
+    });
+  }, [weightHistory]);
+
+  const isLosing = graphData.length > 1 && graphData[graphData.length - 1].weight <= graphData[graphData.length - 2].weight;
   
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
@@ -79,23 +192,6 @@ export function Progress() {
       );
     }
     return null;
-  };
-
-  const handleSaveWeight = () => {
-    localStorage.setItem('current_weight_kg', JSON.stringify(newWeight));
-    setCurrentWeight(newWeight);
-    
-    const newEntry = {
-      month: new Date().toLocaleDateString('en-US', { month: 'short' }),
-      weight: newWeight,
-      date: new Date().toISOString()
-    };
-    
-    const newHistory = [...weightHistory, newEntry];
-    setWeightHistory(newHistory);
-    localStorage.setItem('weight_history', JSON.stringify(newHistory));
-    
-    setShowWeightModal(false);
   };
 
   return (
@@ -113,31 +209,50 @@ export function Progress() {
           initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
           className="flex flex-col gap-3 rounded-[22px] border border-[#F0F0F0] bg-white p-4 shadow-[0_2px_12px_rgba(0,0,0,0.05)]"
         >
-          <div>
-            <span className="text-[12px] font-medium uppercase tracking-[0.5px] text-[#8E8E93]">Your Weight</span>
-            <div className="mt-1 flex items-baseline gap-1">
-              <span className="text-[28px] font-extrabold leading-none text-[#1A1A1A]">{currentWeight}</span>
-              <span className="text-[14px] font-bold text-[#8E8E93]">kg</span>
-            </div>
-          </div>
-          
-          <div>
-            <div className="h-1 w-full overflow-hidden rounded-full bg-[#F5F5F7]">
-              <motion.div 
-                initial={{ width: 0 }} animate={{ width: `${progressPercent}%` }} transition={{ duration: 1, delay: 0.5 }}
-                className="h-full bg-[#1A1A1A]" 
-              />
-            </div>
-            <p className="mt-1 text-[11px] font-medium text-[#8E8E93]">Goal: {goalWeight} kg</p>
-          </div>
+          {loading ? (
+             <div className="animate-pulse flex flex-col gap-3 h-full">
+               <div className="h-4 w-20 bg-gray-200 rounded"></div>
+               <div className="h-8 w-24 bg-gray-200 rounded"></div>
+               <div className="h-2 w-full bg-gray-200 rounded mt-auto"></div>
+             </div>
+          ) : (
+            <>
+              {!hasWeightGoal ? (
+                <div className="flex-1 flex flex-col justify-center">
+                  <span className="text-[12px] font-medium text-[#8E8E93] text-center mb-2">Goal unset</span>
+                  <button onClick={() => setShowWeightModal(true)} className="rounded-xl bg-[#1A1A1A] p-2 text-[13px] font-semibold text-white">Log Weight</button>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <span className="text-[12px] font-medium uppercase tracking-[0.5px] text-[#8E8E93]">Your Weight</span>
+                    <div className="mt-1 flex items-baseline gap-1">
+                      <span className="text-[28px] font-extrabold leading-none text-[#1A1A1A]">{currentWeight}</span>
+                      <span className="text-[14px] font-bold text-[#8E8E93]">kg</span>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="h-1 w-full overflow-hidden rounded-full bg-[#F5F5F7]">
+                      <motion.div 
+                        initial={{ width: 0 }} animate={{ width: `${progressPercent}%` }} transition={{ duration: 1, delay: 0.5 }}
+                        className="h-full bg-[#1A1A1A]" 
+                      />
+                    </div>
+                    <p className="mt-1 text-[11px] font-medium text-[#8E8E93]">Goal: {goalWeight} kg</p>
+                  </div>
 
-          <button 
-            onClick={() => setShowWeightModal(true)}
-            className="mt-1 flex items-center justify-between rounded-xl bg-[#1A1A1A] p-2.5 text-[13px] font-semibold text-white transition-opacity active:opacity-80"
-          >
-            Log Weight
-            <ChevronRight size={16} />
-          </button>
+                  <button 
+                    onClick={() => setShowWeightModal(true)}
+                    className="mt-1 flex items-center justify-between rounded-xl bg-[#1A1A1A] p-2.5 text-[13px] font-semibold text-white transition-opacity active:opacity-80"
+                  >
+                    Log Weight
+                    <ChevronRight size={16} />
+                  </button>
+                </>
+              )}
+            </>
+          )}
         </motion.div>
 
         {/* Streak Card */}
@@ -164,7 +279,7 @@ export function Progress() {
             
             <div className="mt-3 flex gap-1">
               {['S','M','T','W','T','F','S'].map((day, i) => {
-                const isToday = i === 4; // Mocking today as Thursday
+                const isToday = i === 4; 
                 const isLogged = i < 4;
                 return (
                   <div 
@@ -188,7 +303,7 @@ export function Progress() {
       {/* 3. WEIGHT PROGRESS GRAPH */}
       <motion.div 
         initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
-        className="mx-4 mt-4 rounded-[22px] border border-[#F0F0F0] bg-white p-5 shadow-[0_2px_12px_rgba(0,0,0,0.05)]"
+        className="mx-4 mt-4 rounded-[22px] border border-[#F0F0F0] bg-white p-5 shadow-[0_2px_12px_rgba(0,0,0,0.05)] flex flex-col min-h-[350px]"
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-[18px] font-bold text-[#1A1A1A]">Weight Progress</h2>
@@ -198,57 +313,102 @@ export function Progress() {
           </div>
         </div>
 
-        <div className="h-[200px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={weightHistory} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorWeight" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={isLosing ? "#4CAF50" : "#FF6B6B"} stopOpacity={0.2}/>
-                  <stop offset="95%" stopColor={isLosing ? "#4CAF50" : "#FF6B6B"} stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F0F0F0" />
-              <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fontSize: 11, fill: '#8E8E93', dy: 10}} />
-              <YAxis domain={['dataMin - 1', 'dataMax + 1']} axisLine={false} tickLine={false} tick={{fontSize: 11, fill: '#8E8E93'}} />
-              <Tooltip content={<CustomTooltip />} />
-              <Area 
-                type="monotone" 
-                dataKey="weight" 
-                stroke={isLosing ? "#4CAF50" : "#FF6B6B"} 
-                strokeWidth={3}
-                fillOpacity={1} 
-                fill="url(#colorWeight)" 
-                activeDot={{ r: 6, fill: '#fff', stroke: isLosing ? "#4CAF50" : "#FF6B6B", strokeWidth: 2, className: 'shadow-[0_0_0_8px_rgba(76,175,80,0.2)]' }}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+        {loading ? (
+          <div className="h-[200px] w-full flex items-center justify-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-4 border-gray-200 border-t-[#1A1A1A]"></div>
+          </div>
+        ) : error && graphData.length === 0 ? (
+           <div className="h-[200px] w-full flex flex-col items-center justify-center gap-3">
+             <span className="text-gray-400 text-sm">Failed to load history</span>
+             <button onClick={fetchHistory} className="bg-[#1A1A1A] text-white text-xs px-4 py-2 rounded-lg font-bold shadow">Retry</button>
+           </div>
+        ) : graphData.length === 0 ? (
+          <div className="h-[200px] w-full flex flex-col items-center justify-center text-center">
+            <Scale size={32} className="text-[#8E8E93] mb-3 opacity-50" />
+            <p className="text-[14px] font-medium text-[#1A1A1A] mb-1">No weight entries yet</p>
+            <button onClick={() => setShowWeightModal(true)} className="text-[#FF6B35] font-bold text-[13px]">Log your first weight</button>
+          </div>
+        ) : (
+          <div className="h-[200px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={graphData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorWeight" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={isLosing ? "#4CAF50" : "#FF6B6B"} stopOpacity={0.2}/>
+                    <stop offset="95%" stopColor={isLosing ? "#4CAF50" : "#FF6B6B"} stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F0F0F0" />
+                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fontSize: 11, fill: '#8E8E93', dy: 10}} minTickGap={20} />
+                <YAxis domain={['dataMin - 1', 'dataMax + 1']} axisLine={false} tickLine={false} tick={{fontSize: 11, fill: '#8E8E93'}} />
+                <Tooltip content={<CustomTooltip />} />
+                <Area 
+                  type="monotone" 
+                  dataKey="weight" 
+                  stroke={isLosing ? "#4CAF50" : "#FF6B6B"} 
+                  strokeWidth={3}
+                  fillOpacity={1} 
+                  fill="url(#colorWeight)" 
+                  activeDot={{ r: 6, fill: '#fff', stroke: isLosing ? "#4CAF50" : "#FF6B6B", strokeWidth: 2, className: 'shadow-[0_0_0_8px_rgba(76,175,80,0.2)]' }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
 
-        <div className="mt-4 flex justify-center gap-1 rounded-full bg-[#F5F5F7] p-1">
-          {['90D', '6M', '1Y', 'ALL'].map(range => (
+        <div className="mt-auto pt-4 flex justify-center gap-1 rounded-full bg-[#F5F5F7] p-1">
+          {['90D', '6M', '1Y', 'ALL'].map(r => (
             <button
-              key={range}
-              onClick={() => setTimeRange(range)}
+              key={r}
+              onClick={() => setRange(r as any)}
               className={`rounded-full px-4 py-2 text-[12px] font-semibold transition-all ${
-                timeRange === range 
+                range === r 
                   ? 'bg-white text-[#1A1A1A] shadow-[0_1px_3px_rgba(0,0,0,0.1)]' 
                   : 'text-[#8E8E93] active:bg-black/5'
               }`}
             >
-              {range}
+              {r}
             </button>
           ))}
         </div>
-
-        <div className="mt-4 flex items-center gap-2 rounded-2xl bg-[#E8F5E9] px-4 py-3 text-[#4CAF50]">
-          <SparklesIcon />
-          <p className="text-[13px] font-medium leading-tight">
-            {progressPercent > 80 ? "Almost there! You've got this! 💪" : "Great job! Consistency is key, and you're mastering it!"}
-          </p>
-        </div>
       </motion.div>
 
-      {/* 4. DAILY CALORIE INSIGHTS */}
+      {/* 4. RECENT WEIGHT ENTRIES */}
+      {weightHistory.length > 0 && (
+        <motion.div 
+          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
+          className="mx-4 mt-6 rounded-[22px] border border-[#F0F0F0] bg-white p-5 shadow-[0_2px_12px_rgba(0,0,0,0.05)]"
+        >
+          <div className="mb-4">
+            <h2 className="text-[18px] font-bold text-[#1A1A1A]">Recent Logs</h2>
+          </div>
+          <div className="flex flex-col gap-3">
+            {weightHistory.slice().reverse().slice(0, 7).map((entry) => (
+              <div key={entry.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 rounded-2xl bg-[#FAFAFA] border border-[#F0F0F0]">
+                <div className="flex items-center gap-3 w-full">
+                   <div className="flex-1">
+                     <p className="font-bold text-[#1A1A1A] text-[15px]">{entry.weight_kg} kg</p>
+                     <p className="font-medium text-[#8E8E93] text-[12px]">{new Date(entry.logged_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
+                   </div>
+                   {entry.mood && (
+                      <div className="text-[18px]">
+                        {entry.mood === 'great' && '🤩'}
+                        {entry.mood === 'good' && '🙂'}
+                        {entry.mood === 'okay' && '😐'}
+                        {entry.mood === 'bad' && '😩'}
+                      </div>
+                   )}
+                   <button onClick={() => handleDeleteEntry(entry.id)} className="p-2 text-red-500 bg-red-50 rounded-xl opacity-70 active:opacity-100 transition-opacity">
+                     <Trash2 size={16} />
+                   </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      )}
+
+      {/* DAILY CALORIE INSIGHTS */}
       <div className="mx-4 mt-6">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-[18px] font-bold text-[#1A1A1A]">Daily Average Calories</h2>
@@ -287,99 +447,6 @@ export function Progress() {
             ))}
           </div>
         </motion.div>
-
-        <motion.div 
-          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
-          className="grid grid-cols-3 gap-2 border-transparent"
-        >
-          {[
-            { label: 'Best Day', value: '1,890 cal', icon: '🏆', color: 'bg-white' },
-            { label: 'Off Day', value: '3,200 cal', icon: '📊', color: 'bg-white' },
-            { label: 'Weekly Avg', value: '2,415 cal', icon: '📈', color: 'bg-white' },
-          ].map((stat, i) => (
-            <div key={i} className="flex flex-col items-center justify-center gap-1 rounded-[16px] border border-[#F0F0F0] bg-white p-3 text-center shadow-sm">
-              <span className="text-[20px]">{stat.icon}</span>
-              <span className="text-[11px] font-medium text-[#8E8E93]">{stat.label}</span>
-              <span className="text-[13px] font-bold text-[#1A1A1A]">{stat.value}</span>
-            </div>
-          ))}
-        </motion.div>
-      </div>
-
-      {/* 5. STREAK CALENDAR */}
-      <motion.div 
-        initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }}
-        className="mx-4 mt-6 mb-6 rounded-[22px] border border-[#F0F0F0] bg-white p-5 shadow-[0_2px_12px_rgba(0,0,0,0.05)]"
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-[18px] font-bold text-[#1A1A1A]">Activity Calendar</h2>
-          <span className="text-[12px] font-medium text-[#8E8E93]">Last 30 days</span>
-        </div>
-
-        <div className="grid grid-cols-10 gap-1.5">
-          {Array.from({ length: 30 }).map((_, i) => {
-            const isToday = i === 28;
-            const isFuture = i > 28;
-            const completed = i < 28 && Math.random() > 0.3; // mock past data
-            const intensity = completed ? Math.floor(Math.random() * 3) + 1 : 0;
-            
-            let bgClass = "bg-[#FAFAFA] border border-[#F0F0F0]";
-            if (isToday) bgClass = "bg-[#FF6B35] text-white";
-            else if (isFuture) bgClass = "bg-[#F5F5F7] border border-dashed border-[#E5E5EA]";
-            else if (intensity === 3) bgClass = "bg-[#1A1A1A]";
-            else if (intensity === 2) bgClass = "bg-[#A0A0A0]";
-            else if (intensity === 1) bgClass = "bg-[#E0E0E0]";
-
-            return (
-              <motion.div 
-                key={i}
-                whileHover={{ scale: 1.1 }}
-                className={`flex aspect-square items-center justify-center rounded-md ${bgClass} transition-transform`}
-              >
-                {isToday && <span className="text-[10px] font-bold text-white">{new Date().getDate()}</span>}
-              </motion.div>
-            );
-          })}
-        </div>
-
-        <div className="mt-5 flex items-center justify-center gap-2 text-[11px] font-medium text-[#8E8E93]">
-          <span>Less</span>
-          <div className="flex gap-1">
-            <div className="h-2.5 w-2.5 rounded-sm border border-[#F0F0F0] bg-[#FAFAFA]" />
-            <div className="h-2.5 w-2.5 rounded-sm bg-[#E0E0E0]" />
-            <div className="h-2.5 w-2.5 rounded-sm bg-[#A0A0A0]" />
-            <div className="h-2.5 w-2.5 rounded-sm bg-[#1A1A1A]" />
-          </div>
-          <span>More</span>
-        </div>
-      </motion.div>
-
-      {/* 6. ACHIEVEMENT BADGES */}
-      <div className="mx-4 mb-6">
-        <h2 className="mb-3 text-[18px] font-bold text-[#1A1A1A]">Achievements</h2>
-        
-        <div className="grid grid-cols-4 gap-3">
-          {[
-            { icon: '🥇', label: 'First Scan', unlocked: true },
-            { icon: '🔥', label: '7 Day Streak', unlocked: streak >= 7 },
-            { icon: '💪', label: '30 Day Streak', unlocked: streak >= 30 },
-            { icon: '🎯', label: 'Goal Hit', unlocked: false },
-          ].map((badge, i) => (
-            <motion.div 
-              key={i}
-              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.7 + (i * 0.1) }}
-              whileTap={{ scale: 0.95 }}
-              className={`flex aspect-square flex-col items-center justify-center gap-1.5 rounded-[18px] border p-2 text-center transition-all ${
-                badge.unlocked 
-                  ? 'border-[#FF6B35] bg-gradient-to-br from-[#FFE5DB] to-[#FFD4B8] shadow-[0_4px_12px_rgba(255,107,53,0.2)]'
-                  : 'border-transparent bg-[#F5F5F7] opacity-60 grayscale filter'
-              }`}
-            >
-              <span className="text-[28px]">{badge.icon}</span>
-              <span className={`text-[10px] font-bold leading-tight ${badge.unlocked ? 'text-[#1A1A1A]' : 'text-[#8E8E93]'}`}>{badge.label}</span>
-            </motion.div>
-          ))}
-        </div>
       </div>
 
       {/* WEIGHT LOGGING MODAL */}
@@ -389,7 +456,7 @@ export function Progress() {
             <motion.div 
                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                className="fixed inset-0 bg-black/50 backdrop-blur-sm" 
-               onClick={() => setShowWeightModal(false)} 
+               onClick={() => !savingWeight && setShowWeightModal(false)} 
             />
             <motion.div
                initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }}
@@ -401,54 +468,92 @@ export function Progress() {
                     <h2 className="text-[22px] font-extrabold text-[#1A1A1A]">Log Your Weight</h2>
                     <p className="text-[14px] font-medium text-[#8E8E93]">Track your progress</p>
                   </div>
-                  <button onClick={() => setShowWeightModal(false)} className="rounded-full bg-[#F5F5F7] p-2 transition-colors active:bg-gray-200">
+                  <button disabled={savingWeight} onClick={() => setShowWeightModal(false)} className="rounded-full bg-[#F5F5F7] p-2 transition-colors active:bg-gray-200">
                     <X size={20} className="text-[#1A1A1A]" />
                   </button>
                 </div>
 
                 <div className="mx-auto mb-6 flex w-fit rounded-full bg-[#F5F5F7] p-1">
-                  <button className="rounded-full bg-white px-5 py-1.5 text-[13px] font-bold text-[#1A1A1A] shadow-sm">kg</button>
-                  <button className="rounded-full px-5 py-1.5 text-[13px] font-bold text-[#8E8E93] transition-colors hover:text-[#1A1A1A]">lbs</button>
+                  <button onClick={() => handleUnitToggle('kg')} className={`rounded-full px-5 py-1.5 text-[13px] font-bold transition-all ${unit === 'kg' ? 'bg-white text-[#1A1A1A] shadow-sm' : 'text-[#8E8E93]'}`}>kg</button>
+                  <button onClick={() => handleUnitToggle('lbs')} className={`rounded-full px-5 py-1.5 text-[13px] font-bold transition-all ${unit === 'lbs' ? 'bg-white text-[#1A1A1A] shadow-sm' : 'text-[#8E8E93]'}`}>lbs</button>
                 </div>
 
                 <div className="mb-8 text-center object-center">
                   <div className="text-[72px] font-black tracking-tight text-[#1A1A1A] leading-none">
                     {newWeight.toFixed(1)}
                   </div>
-                  <div className="text-[20px] font-bold text-[#8E8E93] mt-2">kg</div>
+                  <div className="text-[20px] font-bold text-[#8E8E93] mt-2">{unit}</div>
                 </div>
 
                 <div className="mb-8 flex items-center justify-center gap-3">
-                  <button onClick={() => setNewWeight(w => Number((w - 0.5).toFixed(1)))} className="flex h-12 w-12 items-center justify-center rounded-full bg-[#F5F5F7] text-[24px] font-medium text-[#1A1A1A] active:scale-95 transition-transform">−</button>
+                  <button onClick={() => setNewWeight(w => Number((w - (unit === 'kg' ? 0.5 : 1)).toFixed(1)))} className="flex h-12 w-12 items-center justify-center rounded-full bg-[#F5F5F7] text-[24px] font-medium text-[#1A1A1A] active:scale-95 transition-transform">−</button>
                   
                   <div className="flex gap-2 overflow-hidden px-4">
-                    {[newWeight - 0.5, newWeight, newWeight + 0.5].map((w, i) => (
-                      <div key={i} className={`flex h-12 w-16 items-center justify-center rounded-xl font-bold transition-all ${
-                        i === 1 ? 'bg-[#1A1A1A] text-white shadow-md' : 'bg-transparent text-[#8E8E93]'
-                      }`}>
-                        {w.toFixed(1)}
-                      </div>
-                    ))}
+                    {[-1, 0, 1].map((offset, i) => {
+                      const displayedValue = newWeight + (offset * (unit === 'kg' ? 0.5 : 1));
+                      return (
+                        <div key={i} className={`flex h-12 min-w-[3rem] px-2 items-center justify-center rounded-xl font-bold transition-all ${
+                          i === 1 ? 'bg-[#1A1A1A] text-white shadow-md' : 'bg-transparent text-[#8E8E93]'
+                        }`}>
+                          {(displayedValue > 0 ? displayedValue : 0).toFixed(1)}
+                        </div>
+                      );
+                    })}
                   </div>
 
-                  <button onClick={() => setNewWeight(w => Number((w + 0.5).toFixed(1)))} className="flex h-12 w-12 items-center justify-center rounded-full bg-[#F5F5F7] text-[24px] font-medium text-[#1A1A1A] active:scale-95 transition-transform">+</button>
+                  <button onClick={() => setNewWeight(w => Number((w + (unit === 'kg' ? 0.5 : 1)).toFixed(1)))} className="flex h-12 w-12 items-center justify-center rounded-full bg-[#F5F5F7] text-[24px] font-medium text-[#1A1A1A] active:scale-95 transition-transform">+</button>
                 </div>
 
-                <div className="mb-6 flex gap-2">
-                  <button className="flex-1 rounded-xl bg-[#1A1A1A] py-2.5 text-[13px] font-bold text-white">Today</button>
-                  <button className="flex-1 rounded-xl bg-[#F5F5F7] py-2.5 text-[13px] font-bold text-[#8E8E93] transition-colors active:bg-gray-200">Yesterday</button>
+                <div className="mb-4 flex gap-2">
+                  <button onClick={() => setEntryDateType('today')} className={`flex-1 rounded-xl py-2.5 text-[13px] font-bold transition-colors ${entryDateType === 'today' ? 'bg-[#1A1A1A] text-white' : 'bg-[#F5F5F7] text-[#8E8E93] active:bg-gray-200'}`}>Today</button>
+                  <button onClick={() => setEntryDateType('custom')} className={`flex-1 rounded-xl py-2.5 text-[13px] font-bold transition-colors ${entryDateType === 'custom' ? 'bg-[#1A1A1A] text-white' : 'bg-[#F5F5F7] text-[#8E8E93] active:bg-gray-200'}`}>Custom</button>
+                </div>
+                
+                {entryDateType === 'custom' && (
+                  <div className="mb-4">
+                    <input 
+                      type="date" 
+                      max={new Date().toISOString().split('T')[0]}
+                      value={customDate}
+                      onChange={(e) => setCustomDate(e.target.value)}
+                      className="w-full rounded-xl bg-[#FAFAFA] border border-[#F0F0F0] p-3 text-[14px] font-semibold text-[#1A1A1A] outline-none focus:border-[#1A1A1A]"
+                    />
+                  </div>
+                )}
+
+                <div className="mb-4 grid grid-cols-4 gap-2">
+                   {(['great', 'good', 'okay', 'bad'] as const).map((m) => (
+                      <button 
+                         key={m}
+                         onClick={() => setMood(mood === m ? null : m)}
+                         className={`py-2 rounded-xl text-2xl flex flex-col items-center justify-center border transition-all ${mood === m ? 'border-[#1A1A1A] bg-gray-50' : 'border-[#F0F0F0] bg-[#FAFAFA] opacity-70'}`}
+                      >
+                         {m === 'great' && '🤩'}
+                         {m === 'good' && '🙂'}
+                         {m === 'okay' && '😐'}
+                         {m === 'bad' && '😩'}
+                      </button>
+                   ))}
                 </div>
 
                 <textarea 
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
                   placeholder="Add a note..." 
-                  className="mb-6 min-h-[80px] w-full rounded-xl bg-[#FAFAFA] border border-[#F0F0F0] p-3 text-[14px] text-[#1A1A1A] placeholder:text-[#8E8E93] outline-none focus:border-[#1A1A1A] transition-colors"
+                  className="mb-6 min-h-[60px] w-full rounded-xl bg-[#FAFAFA] border border-[#F0F0F0] p-3 text-[14px] text-[#1A1A1A] placeholder:text-[#8E8E93] outline-none focus:border-[#1A1A1A] transition-colors resize-none"
                 />
 
                 <button 
+                  disabled={savingWeight}
                   onClick={handleSaveWeight}
-                  className="w-full rounded-full bg-[#1A1A1A] py-4 text-[16px] font-bold text-white shadow-[0_4px_16px_rgba(0,0,0,0.15)] transition-opacity active:opacity-90"
+                  className="w-full rounded-full bg-[#1A1A1A] py-4 text-[16px] font-bold text-white shadow-[0_4px_16px_rgba(0,0,0,0.15)] transition-opacity active:opacity-90 disabled:opacity-50"
                 >
-                  Save Weight Entry
+                  {savingWeight ? (
+                    <div className="flex items-center justify-center">
+                       <div className="animate-spin rounded-full h-5 w-5 border-2 border-gray-400 border-t-white mr-2"></div>
+                       Saving...
+                    </div>
+                  ) : "Save Weight Entry"}
                 </button>
               </div>
             </motion.div>
@@ -458,14 +563,3 @@ export function Progress() {
     </div>
   );
 }
-
-function SparklesIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M10 2L12 8.5L18.5 10.5L12 12.5L10 19L8 12.5L1.5 10.5L8 8.5L10 2Z" fill="currentColor"/>
-      <path d="M18.5 17L19.5 19.5L22 20.5L19.5 21.5L18.5 24L17.5 21.5L15 20.5L17.5 19.5L18.5 17Z" fill="currentColor"/>
-      <path d="M19 4L19.5 5.5L21 6L19.5 6.5L19 8L18.5 6.5L17 6L18.5 5.5L19 4Z" fill="currentColor"/>
-    </svg>
-  );
-}
-

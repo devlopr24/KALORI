@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronRight, Target, Activity, Flame, Bell, Clock, Scale, Moon, Download, Lock, FileText, HelpCircle, MessageCircle, Star, Share, Info, Trash2, RotateCcw } from 'lucide-react';
+import { ChevronRight, Target, Activity, Flame, Bell, Clock, Scale, Moon, Download, Lock, FileText, HelpCircle, MessageCircle, Star, Share, Info, Trash2, RotateCcw, LogOut } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
 
 export function Settings() {
   const navigate = useNavigate();
+  const { user, profile: authProfile, signOut } = useAuth();
   const [profile, setProfile] = useState<any>({});
   
   // Settings State
   const [notifications, setNotifications] = useState(true);
   const [showResetModal, setShowResetModal] = useState(false);
   
-  // Update state from local storage
+  // Update state from local storage & auth
   const loadData = () => {
     const getSetting = (key: string, def: any) => {
       try {
@@ -23,18 +25,18 @@ export function Settings() {
     };
 
     setProfile({
-      name: getSetting('user_name', 'KALORI User'),
-      email: getSetting('user_email', 'teachmantra90@gmail.com'),
-      calorie_goal: getSetting('daily_calorie_goal', 2547),
-      protein_goal: getSetting('protein_goal_g', 120),
-      carbs_goal: getSetting('carbs_goal_g', 250),
-      fats_goal: getSetting('fats_goal_g', 85),
-      target_weight: getSetting('goal_weight_kg', 65),
-      current_weight: getSetting('current_weight_kg', 70),
-      activity: getSetting('activity_level', 'Moderate'),
+      name: user?.user_metadata?.full_name || getSetting('user_name', 'KALORI User'),
+      email: user?.email || getSetting('user_email', 'teachmantra90@gmail.com'),
+      calorie_goal: authProfile?.daily_calorie_goal || getSetting('daily_calorie_goal', 2547),
+      protein_goal: authProfile?.protein_goal_g || getSetting('protein_goal_g', 120),
+      carbs_goal: authProfile?.carbs_goal_g || getSetting('carbs_goal_g', 250),
+      fats_goal: authProfile?.fats_goal_g || getSetting('fats_goal_g', 85),
+      target_weight: authProfile?.goal_weight_kg || getSetting('goal_weight_kg', 65),
+      current_weight: authProfile?.current_weight_kg || getSetting('current_weight_kg', 70),
+      activity: authProfile?.activity_level || getSetting('activity_level', 'Moderate'),
       weight_unit: getSetting('weight_unit', 'kg'),
       is_premium: getSetting('is_premium', false),
-      streak: getSetting('current_streak', 5)
+      streak: authProfile?.current_streak || getSetting('current_streak', 5)
     });
     setNotifications(getSetting('notifications_enabled', true));
   };
@@ -43,7 +45,7 @@ export function Settings() {
     loadData();
     window.addEventListener('storage', loadData);
     return () => window.removeEventListener('storage', loadData);
-  }, []);
+  }, [user, authProfile]);
 
   const handleToggleNotifications = () => {
     const newVal = !notifications;
@@ -292,10 +294,19 @@ export function Settings() {
 
       {/* DANGER ZONE */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }}>
-        <Section title="Danger Zone">
+        <Section title="Account">
+          <SettingsRow 
+            icon={<LogOut size={18} className="text-[#8E8E93]" />} bg="bg-[#F0F0F0]"
+            title="Sign Out" subtitle="Log out of your account"
+            onClick={async () => {
+              await signOut();
+              navigate('/auth/welcome');
+            }}
+            right={<ChevronRight size={18} className="text-[#C7C7CC]" />}
+          />
           <SettingsRow 
             icon={<RotateCcw size={18} className="text-[#FF8C00]" />} bg="bg-[#FFF0E0]"
-            title="Reset App Data" subtitle="Clear all data and start over"
+            title="Reset App Data" subtitle="Clear local cache"
             onClick={() => setShowResetModal(true)}
             right={<ChevronRight size={18} className="text-[#C7C7CC]" />}
           />

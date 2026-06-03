@@ -1,7 +1,8 @@
-import { Meal } from '@/hooks/useUserData';
 import { motion } from 'framer-motion';
 
-export function MealCard({ meal, onClick }: { meal: Meal; onClick: () => void }) {
+export function MealCard({ meal, onClick }: { meal: any; onClick: () => void }) {
+  const formattedTime = meal.logged_at ? new Date(meal.logged_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : (meal.time || '');
+
   return (
     <motion.div
       whileTap={{ scale: 0.98 }}
@@ -12,22 +13,22 @@ export function MealCard({ meal, onClick }: { meal: Meal; onClick: () => void })
         {meal.image_url ? (
           <img src={meal.image_url} alt={meal.name} className="h-full w-full object-cover" />
         ) : (
-          meal.emoji
+          meal.emoji || '🍽️'
         )}
       </div>
       
       <div className="ml-[12px] flex flex-1 flex-col justify-center">
         <div className="flex items-center justify-between">
           <h4 className="text-[16px] font-bold text-text-primary limit-lines-1 truncate pr-2">{meal.name}</h4>
-          <span className="shrink-0 text-[12px] text-text-secondary">{meal.time}</span>
+          <span className="shrink-0 text-[12px] text-text-secondary">{formattedTime}</span>
         </div>
         
         <div className="mt-[4px] text-[15px] font-semibold text-text-primary">
-          <span className="text-xl inline-block mr-1">🔥</span> {meal.calories} Calories
+          <span className="text-xl inline-block mr-1">🔥</span> {Math.round(meal.calories || 0)} Calories
         </div>
         
         <div className="mt-[4px] text-[12px] text-text-secondary">
-          🍗 {meal.protein}g &nbsp; 🌾 {meal.carbs}g &nbsp; 🥑 {meal.fats}g
+          🍗 {Math.round(meal.protein || 0)}g &nbsp; 🌾 {Math.round(meal.carbs || 0)}g &nbsp; 🥑 {Math.round(meal.fats || 0)}g
         </div>
       </div>
     </motion.div>
