@@ -26,6 +26,13 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     return <Navigate to="/auth/welcome" replace state={{ from: location }} />;
   }
 
+  // Enforce onboarding
+  if (profile && profile.onboarding_completed === false) {
+    if (!location.pathname.startsWith('/onboarding')) {
+      return <Navigate to="/onboarding/welcome" replace />;
+    }
+  }
+
   // If profile is null but user exists,
   // do NOT block. Allow rendering.
   return <>{children}</>;

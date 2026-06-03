@@ -8,7 +8,7 @@ import toast from 'react-hot-toast';
 export function Activity() {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<'sedentary' | 'lightly_active' | 'moderately_active' | 'very_active' | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -35,10 +35,10 @@ export function Activity() {
   };
   
   const options = [
-    { id: 'sedentary', label: 'Sedentary', desc: 'Little to no exercise. Desk job.', emoji: '🪑' },
-    { id: 'lightly_active', label: 'Lightly Active', desc: 'Light exercise 1-3 days/week', emoji: '🚶' },
-    { id: 'moderately_active', label: 'Moderately Active', desc: 'Exercise 3-5 days/week', emoji: '🏃' },
-    { id: 'very_active', label: 'Very Active', desc: 'Intense exercise 6-7 days/week', emoji: '🏋️' },
+    { id: 'sedentary' as const, label: 'Sedentary', desc: 'Little to no exercise. Desk job.', emoji: '🪑' },
+    { id: 'lightly_active' as const, label: 'Lightly Active', desc: 'Light exercise 1-3 days/week', emoji: '🚶' },
+    { id: 'moderately_active' as const, label: 'Moderately Active', desc: 'Exercise 3-5 days/week', emoji: '🏃' },
+    { id: 'very_active' as const, label: 'Very Active', desc: 'Intense exercise 6-7 days/week', emoji: '🏋️' },
   ];
 
   return (

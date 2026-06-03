@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export function PaywallSuccess() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [showConfetti, setShowConfetti] = useState(false);
 
   useEffect(() => {
@@ -15,6 +16,15 @@ export function PaywallSuccess() {
     
     return () => clearTimeout(timer);
   }, []);
+
+  const handleContinue = () => {
+    const source = searchParams.get('source');
+    if (source === 'scan_limit') {
+      navigate('/scan', { replace: true });
+    } else {
+      navigate('/', { replace: true });
+    }
+  };
 
   return (
     <div className="flex h-screen w-full flex-col items-center justify-center bg-[#FAFAFA] p-6 text-center">
@@ -67,7 +77,7 @@ export function PaywallSuccess() {
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ delay: 0.7 }}
-        onClick={() => navigate('/')}
+        onClick={handleContinue}
         className="border-none outline-none mt-8 w-full max-w-[340px] rounded-[16px] bg-[#1A1A1A] py-[18px] text-[16px] font-bold text-white shadow-xl transition-transform active:scale-[0.98]"
       >
         Start Using Premium

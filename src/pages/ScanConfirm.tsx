@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Check, Sparkles, X, Pencil } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { mealService } from '@/lib/mealService';
+import { premiumGateService } from '@/lib/premiumGateService';
 import toast from 'react-hot-toast';
 
 // Configuration Data
@@ -116,6 +117,22 @@ export function ScanConfirm() {
         ai_confidence: aiResult.confidence,
         notes: JSON.stringify({ extras: selectedExtras.map(e => e.label), ingredients: ingredientsString })
       });
+
+      try {
+        await premiumGateService.recordSuccessfulScan(user.id, {
+          identified_name: aiResult.dish_name_english,
+          identified_food_id: null,
+          ai_provider: 'fallback',
+          ai_model: null,
+          ai_confidence: aiResult.confidence || null,
+          ai_response: aiResult,
+          image_url: rawImage.substring(0, 50) === 'data:image' ? null : null, // we shouldn't save giant base64 to DB unless needed. We'll skip for now or limit size
+          processing_time_ms: null,
+          api_cost_inr: null
+        });
+      } catch (e) {
+        console.warn("Failed to record scan", e);
+      }
 
       setShowSuccess(true);
       setTimeout(() => navigate('/'), 800);

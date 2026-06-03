@@ -1,14 +1,21 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
+import { settingsService } from '@/lib/settingsService';
 
 export function Paywall() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const source = searchParams.get('source');
+  
   const [selectedPlan, setSelectedPlan] = useState('yearly');
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPromoModal, setShowPromoModal] = useState(false);
   const [promoCode, setPromoCode] = useState('');
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+
+  const { user, refreshProfile } = useAuth();
 
   const calculateExpiry = (plan: string) => {
     const date = new Date();
@@ -18,18 +25,24 @@ export function Paywall() {
     return date.toISOString();
   };
 
-  const handleSubscribe = () => {
+  const handleSubscribe = async () => {
+    if (!user) return;
     setIsProcessing(true);
     
     // Simulate payment
-    setTimeout(() => {
-      localStorage.setItem('is_premium', 'true');
-      localStorage.setItem('premium_plan', selectedPlan);
-      localStorage.setItem('premium_started', new Date().toISOString());
-      localStorage.setItem('premium_expires', calculateExpiry(selectedPlan));
-      
-      setIsProcessing(false);
-      navigate('/paywall/success');
+    setTimeout(async () => {
+      try {
+        await settingsService.updateProfile(user.id, {
+           is_premium: true,
+           premium_plan: selectedPlan as 'yearly' | 'monthly' | 'lifetime',
+           premium_expires_at: calculateExpiry(selectedPlan)
+        });
+        await refreshProfile();
+        setIsProcessing(false);
+        navigate(`/paywall/success${source ? `?source=${source}` : ''}`);
+      } catch (e) {
+        setIsProcessing(false);
+      }
     }, 3000);
   };
 

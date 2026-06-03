@@ -2,14 +2,49 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronRight } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { premiumGateService } from '@/lib/premiumGateService';
 
 export function ScanOptions() {
   const navigate = useNavigate();
+  const { user, profile } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+  const [remaining, setRemaining] = useState<number | null>(null);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     requestAnimationFrame(() => setIsOpen(true));
   }, []);
+
+  useEffect(() => {
+    const loadRemaining = async () => {
+      if (!user) return;
+      try {
+        setChecking(true);
+        // Safety timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+        const isPrem = premiumGateService.isPremium(profile);
+        if (isPrem) {
+          clearTimeout(timeoutId);
+          setRemaining(null); 
+          return;
+        }
+
+        const r = await premiumGateService.getRemainingFreeScans(user.id, 3);
+        clearTimeout(timeoutId);
+        if (!controller.signal.aborted) {
+          setRemaining(r);
+        }
+      } catch (e) {
+        setRemaining(3); // fail-open
+      } finally {
+        setChecking(false);
+      }
+    };
+    loadRemaining();
+  }, [user, profile]);
 
   const closeAndNavigate = (path: string) => {
     setIsOpen(false);
@@ -25,16 +60,26 @@ export function ScanOptions() {
     }, 300);
   };
 
+  const handleScanClick = () => {
+    if (checking) return; // wait till loaded
+
+    if (remaining !== null && remaining <= 0) {
+      closeAndNavigate('/paywall?source=scan_limit');
+    } else {
+      closeAndNavigate('/scan');
+    }
+  };
+
   const options = [
     {
       id: 'scan',
       title: 'Scan Food with AI',
-      desc: 'Take a photo, AI identifies it instantly',
+      desc: remaining === null ? 'Unlimited scans' : `Free scans remaining: ${remaining}/3`,
       icon: '📸',
       iconBg: '#FF6B35',
       cardBg: '#FFF8F3',
       border: '#FFE5DB',
-      path: '/scan',
+      isAiCamera: true
     },
     {
       id: 'voice',
@@ -105,13 +150,15 @@ export function ScanOptions() {
                   key={opt.id}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => {
-                    if (opt.path === '#') {
+                    if (opt.isAiCamera) {
+                      handleScanClick();
+                    } else if (opt.path === '#') {
                       alert('Coming Soon!');
-                    } else {
+                    } else if (opt.path) {
                       closeAndNavigate(opt.path);
                     }
                   }}
-                  className="flex cursor-pointer items-center gap-[14px] rounded-[20px] p-[18px]"
+                  className={`flex cursor-pointer items-center gap-[14px] rounded-[20px] p-[18px] ${opt.isAiCamera && checking ? 'opacity-70' : ''}`}
                   style={{ backgroundColor: opt.cardBg, border: `1px solid ${opt.border}` }}
                 >
                   <div
@@ -122,8 +169,12 @@ export function ScanOptions() {
                   </div>
 
                   <div className="flex flex-1 flex-col">
-                    <span className="text-[16px] font-bold text-[#1A1A1A]">{opt.title}</span>
-                    <span className="mt-[2px] text-[13px] font-medium text-[#8E8E93]">{opt.desc}</span>
+                    <span className="text-[16px] font-bold text-[#1A1A1A]">
+                      {opt.title} {opt.isAiCamera && checking && <span className="ml-1 text-[11px] font-normal opacity-50">(Checking...)</span>}
+                    </span>
+                    <span className={`mt-[2px] text-[13px] font-medium ${opt.isAiCamera && remaining !== null && remaining <= 0 ? 'text-[#FF6B6B] font-bold' : 'text-[#8E8E93]'}`}>
+                      {opt.desc}
+                    </span>
                   </div>
 
                   <ChevronRight color="#C7C7CC" size={20} />

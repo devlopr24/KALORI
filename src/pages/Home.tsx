@@ -8,6 +8,7 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { mealService } from '@/lib/mealService';
 import { useAuth } from '@/contexts/AuthContext';
+import { premiumGateService } from '@/lib/premiumGateService';
 import toast from 'react-hot-toast';
 
 export function Home() {
@@ -50,6 +51,7 @@ export function Home() {
 
   const caloriesRemaining = profile.daily_calorie_goal - consumedCalories;
   const isOverGoal = caloriesRemaining < 0;
+  const isPremium = premiumGateService.isPremium(profile);
 
   const handleMealClick = (id: string) => {
     navigate(`/meal/${id}`);
@@ -62,13 +64,24 @@ export function Home() {
       {/* 1. TOP HEADER */}
       <header className="sticky top-0 z-10 flex h-[60px] items-center justify-between bg-white px-[16px]">
         <Logo />
-        <motion.button 
-          whileTap={{ scale: 0.95 }}
-          className="flex items-center justify-center gap-1 rounded-full border border-gray-100 bg-white px-[14px] py-[8px] shadow-[0_2px_8px_rgba(0,0,0,0.04)]"
-        >
-          <span className="text-[14px]">🔥</span>
-          <span className="text-[14px] font-semibold text-gray-900">{formatNum(profile.current_streak || 0)}</span>
-        </motion.button>
+        <div className="flex items-center gap-[8px]">
+          {isPremium && (
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="flex items-center justify-center rounded-full bg-gradient-to-r from-[#FFD700] to-[#FDB931] px-[12px] py-[6px] shadow-[0_2px_8px_rgba(253,185,49,0.3)]"
+            >
+              <span className="text-[12px] font-extrabold text-[#996515]">PRO</span>
+            </motion.div>
+          )}
+          <motion.button 
+            whileTap={{ scale: 0.95 }}
+            className="flex items-center justify-center gap-1 rounded-full border border-gray-100 bg-white px-[14px] py-[8px] shadow-[0_2px_8px_rgba(0,0,0,0.04)]"
+          >
+            <span className="text-[14px]">🔥</span>
+            <span className="text-[14px] font-semibold text-gray-900">{formatNum(profile.current_streak || 0)}</span>
+          </motion.button>
+        </div>
       </header>
 
       {/* 2. DATE SELECTOR */}

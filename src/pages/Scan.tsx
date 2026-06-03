@@ -2,9 +2,12 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, HelpCircle, Zap, Image as ImageIcon } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { premiumGateService } from '@/lib/premiumGateService';
 
 export function Scan() {
   const navigate = useNavigate();
+  const { user, profile } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
@@ -12,6 +15,27 @@ export function Scan() {
   const [showFallback, setShowFallback] = useState(false);
   const [flash, setFlash] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
+
+  useEffect(() => {
+    const checkGate = async () => {
+      if (!user) return;
+      try {
+        const isPrem = premiumGateService.isPremium(profile);
+        if (!isPrem) {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 6000);
+          const r = await premiumGateService.getRemainingFreeScans(user.id, 3);
+          clearTimeout(timeoutId);
+          if (!controller.signal.aborted && r <= 0) {
+            navigate('/paywall?source=scan_limit', { replace: true });
+          }
+        }
+      } catch (e) {
+        // fail-open
+      }
+    };
+    checkGate();
+  }, [user, profile, navigate]);
 
   const startCamera = async () => {
     try {

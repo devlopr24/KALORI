@@ -50,11 +50,13 @@ export const mealService = {
 
     // Update streak - calling DB function
     // Assuming the function update_user_streak exists on Supabase as per instructions
-    await supabase.rpc('update_user_streak', {
+    const { error: rpcError } = await supabase.rpc('update_user_streak', {
       p_user_id: userId
-    }).catch(err => {
-      console.warn("Failed to update user streak via RPC:", err);
     });
+    
+    if (rpcError) {
+      console.warn("Failed to update user streak via RPC:", rpcError);
+    }
 
     return data;
   },
